@@ -49,14 +49,29 @@ export async function POST(request: Request) {
 
     // Required backend credentials:
     // - GOOGLE_APPLICATION_CREDENTIALS=path/to/service-account.json
+    //   OR (recommended for Vercel/serverless) GOOGLE_APPLICATION_CREDENTIALS_JSON / _B64
     // - ANDROID_PACKAGE_NAME=com.fg.patpat (must match your appId)
     // - (Optional) ANDROID_ALLOWED_CERT_SHA256=... (signing cert digest)
     const packageName = requireEnv('ANDROID_PACKAGE_NAME');
-    resolveGoogleApplicationCredentialsPath();
+    const scopes = ['https://www.googleapis.com/auth/playintegrity'];
 
-    const auth = new google.auth.GoogleAuth({
-      scopes: ['https://www.googleapis.com/auth/playintegrity'],
-    });
+    const credsJson =
+      process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ||
+      process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+    const credsB64 = process.env.GOOGLE_APPLICATION_CREDENTIALS_B64;
+
+    let auth: InstanceType<typeof google.auth.GoogleAuth>;
+    if (credsJson || credsB64) {
+      const raw = credsJson
+        ? credsJson
+        : Buffer.from(credsB64 as string, 'base64').toString('utf8');
+      const credentials = JSON.parse(raw) as Record<string, unknown>;
+      auth = new google.auth.GoogleAuth({ scopes, credentials });
+    } else {
+      // Local/dev: allow GOOGLE_APPLICATION_CREDENTIALS to point to a file path
+      resolveGoogleApplicationCredentialsPath();
+      auth = new google.auth.GoogleAuth({ scopes });
+    }
     const playintegrity = google.playintegrity({ version: 'v1', auth });
 
     const decode = await playintegrity.v1.decodeIntegrityToken({
