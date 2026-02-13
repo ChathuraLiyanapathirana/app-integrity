@@ -187,7 +187,19 @@ export async function POST(request: Request) {
       .filter(Boolean);
     const certDigests = (appIntegrity.certificateSha256Digest || []) as string[];
     if (allowedCerts.length > 0 && Array.isArray(certDigests)) {
-      const ok = allowedCerts.some((c) => certDigests.includes(c));
+      // Play Integrity may return base64url (web-safe) digests, while you might
+      // configure base64 in env vars. Compare by decoded bytes to avoid format issues.
+      const allowedBytes = allowedCerts
+        .map((c) => decodeB64Any(c))
+        .filter((b): b is Buffer => Boolean(b));
+      const payloadBytes = certDigests
+        .map((c) => decodeB64Any(c))
+        .filter((b): b is Buffer => Boolean(b));
+
+      const ok =
+        allowedBytes.length > 0 &&
+        payloadBytes.length > 0 &&
+        allowedBytes.some((a) => payloadBytes.some((p) => buffersEqual(a, p)));
       if (!ok) {
         if (isDebug()) {
           console.warn('[integrity/android/verify] signing cert mismatch', {
