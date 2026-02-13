@@ -21,6 +21,10 @@ function envPresence(name: string) {
   return { name, set: true as const, length: v.length };
 }
 
+function fp(value: string) {
+  return crypto.createHash('sha256').update(value).digest('hex').slice(0, 12);
+}
+
 function json(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, {
     ...init,
@@ -73,12 +77,22 @@ export async function POST(request: Request) {
 
     if (isDebug()) {
       // Safe diagnostics: never log token or private keys.
+      const credentialSource = credsJson ? 'json' : credsB64 ? 'b64' : 'file_or_default';
       console.log('[integrity/android/verify] debug env', {
         packageName,
-        ...envPresence('ANDROID_PACKAGE_NAME'),
-        ...envPresence('GOOGLE_APPLICATION_CREDENTIALS_JSON'),
-        ...envPresence('GOOGLE_APPLICATION_CREDENTIALS_B64'),
-        ...envPresence('GOOGLE_APPLICATION_CREDENTIALS'),
+        credentialSource,
+        env: {
+          ANDROID_PACKAGE_NAME: envPresence('ANDROID_PACKAGE_NAME'),
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: envPresence('GOOGLE_APPLICATION_CREDENTIALS_JSON'),
+          GOOGLE_SERVICE_ACCOUNT_JSON: envPresence('GOOGLE_SERVICE_ACCOUNT_JSON'),
+          GOOGLE_APPLICATION_CREDENTIALS_B64: envPresence('GOOGLE_APPLICATION_CREDENTIALS_B64'),
+          GOOGLE_APPLICATION_CREDENTIALS: envPresence('GOOGLE_APPLICATION_CREDENTIALS'),
+        },
+        request: {
+          requestIdFp: fp(requestId),
+          nonceFp: fp(nonce),
+          nonceLen: nonce.length,
+        },
       });
     }
 
@@ -114,6 +128,13 @@ export async function POST(request: Request) {
       return json({ ok: false, reason: 'package_mismatch' }, { status: 401 });
     }
     if (requestDetails.nonce !== nonce) {
+      if (isDebug() && typeof requestDetails.nonce === 'string') {
+        console.warn('[integrity/android/verify] nonce mismatch detail', {
+          requestIdFp: fp(requestId),
+          expected: { fp: fp(nonce), len: nonce.length },
+          payload: { fp: fp(requestDetails.nonce), len: requestDetails.nonce.length },
+        });
+      }
       return json({ ok: false, reason: 'nonce_mismatch_payload' }, { status: 401 });
     }
 

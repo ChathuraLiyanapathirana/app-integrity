@@ -48,6 +48,10 @@ export function randomBase64Url(bytes = 32) {
   return crypto.randomBytes(bytes).toString('base64url');
 }
 
+export function randomBase64(bytes = 32) {
+  return crypto.randomBytes(bytes).toString('base64');
+}
+
 export function requireEnv(name: string) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);

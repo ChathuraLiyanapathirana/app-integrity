@@ -5,6 +5,7 @@ import {
   cleanupExpiredChallenges,
   getIntegrityStore,
   now,
+  randomBase64,
   randomBase64Url,
 } from '@/lib/integrityStore';
 
@@ -37,7 +38,9 @@ export async function GET(req: NextRequest) {
   const requestId = crypto.randomUUID();
 
   if (platform === 'android') {
-    const nonce = randomBase64Url(32);
+    // Use standard base64 for Android. Some Play Integrity client implementations
+    // treat nonce as base64 and may normalize base64url -> base64, causing mismatches.
+    const nonce = randomBase64(32);
     store.challenges.set(requestId, { platform: 'android', nonce, createdAt: now() });
     return json({
       ok: true,
