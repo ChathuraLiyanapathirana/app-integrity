@@ -4,10 +4,10 @@ import crypto from 'crypto';
 
 import {
   cleanupExpiredChallenges,
-  getIntegrityStore,
   requireEnv,
   resolveGoogleApplicationCredentialsPath,
 } from '@/lib/integrityStore';
+import { deleteChallenge, loadChallenge } from '@/lib/integrityPersistence';
 
 export const runtime = 'nodejs';
 
@@ -65,7 +65,6 @@ function json(data: unknown, init?: ResponseInit) {
 export async function POST(request: Request) {
   try {
     cleanupExpiredChallenges();
-    const store = getIntegrityStore();
 
     const body = await request.json().catch(() => null);
     const { requestId, nonce, token } = (body || {}) as {
@@ -78,7 +77,7 @@ export async function POST(request: Request) {
       return json({ ok: false, reason: 'missing_fields' }, { status: 400 });
     }
 
-    const record = store.challenges.get(requestId);
+    const record = await loadChallenge(requestId);
     if (!record || record.platform !== 'android') {
       return json({ ok: false, reason: 'invalid_requestId' }, { status: 401 });
     }
@@ -237,7 +236,7 @@ export async function POST(request: Request) {
       );
     }
 
-    store.challenges.delete(requestId);
+    await deleteChallenge(requestId);
     return json({ ok: true });
   } catch (e) {
     const errorId = crypto.randomUUID();

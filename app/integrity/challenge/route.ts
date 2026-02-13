@@ -3,10 +3,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import {
   cleanupExpiredChallenges,
-  getIntegrityStore,
   now,
   randomBase64Url,
 } from '@/lib/integrityStore';
+import { loadIosKey, persistChallenge } from '@/lib/integrityPersistence';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -27,7 +27,6 @@ function json(data: unknown, init?: ResponseInit) {
 // -------------------------
 export async function GET(req: NextRequest) {
   cleanupExpiredChallenges();
-  const store = getIntegrityStore();
 
   const platform = (req.nextUrl.searchParams.get('platform') || '')
     .toLowerCase()
@@ -39,7 +38,7 @@ export async function GET(req: NextRequest) {
   if (platform === 'android') {
     // Play Integrity requires "base64 web-safe no-wrap" (base64url without padding/newlines).
     const nonce = randomBase64Url(32);
-    store.challenges.set(requestId, { platform: 'android', nonce, createdAt: now() });
+    await persistChallenge(requestId, { platform: 'android', nonce, createdAt: now() });
     return json({
       ok: true,
       provider: 'android_play_integrity',
@@ -52,8 +51,8 @@ export async function GET(req: NextRequest) {
     if (!keyId) return json({ ok: false, reason: 'missing_keyId' }, { status: 400 });
 
     const challenge = randomBase64Url(32);
-    const mode = store.iosKeys.has(keyId) ? 'assert' : 'attest';
-    store.challenges.set(requestId, {
+    const mode = (await loadIosKey(keyId)) ? 'assert' : 'attest';
+    await persistChallenge(requestId, {
       platform: 'ios',
       keyId,
       challenge,

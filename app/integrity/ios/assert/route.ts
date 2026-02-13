@@ -3,9 +3,14 @@ import { verifyAssertion } from 'node-app-attest';
 
 import {
   cleanupExpiredChallenges,
-  getIntegrityStore,
   requireEnv,
 } from '@/lib/integrityStore';
+import {
+  deleteChallenge,
+  loadChallenge,
+  loadIosKey,
+  saveIosKey,
+} from '@/lib/integrityPersistence';
 
 export const runtime = 'nodejs';
 
@@ -25,7 +30,6 @@ function json(data: unknown, init?: ResponseInit) {
 export async function POST(request: Request) {
   try {
     cleanupExpiredChallenges();
-    const store = getIntegrityStore();
 
     const body = await request.json().catch(() => null);
     const { requestId, keyId, challenge, assertion } = (body || {}) as {
@@ -39,7 +43,7 @@ export async function POST(request: Request) {
       return json({ ok: false, reason: 'missing_fields' }, { status: 400 });
     }
 
-    const record = store.challenges.get(requestId);
+    const record = await loadChallenge(requestId);
     if (!record || record.platform !== 'ios' || record.keyId !== keyId) {
       return json({ ok: false, reason: 'invalid_requestId' }, { status: 401 });
     }
@@ -50,7 +54,7 @@ export async function POST(request: Request) {
     const bundleIdentifier = requireEnv('IOS_BUNDLE_ID');
     const teamIdentifier = requireEnv('IOS_TEAM_ID');
 
-    const stored = store.iosKeys.get(keyId);
+    const stored = await loadIosKey(keyId);
     if (!stored) {
       return json({ ok: false, reason: 'unknown_keyId' }, { status: 401 });
     }
@@ -64,11 +68,8 @@ export async function POST(request: Request) {
       signCount: stored.signCount,
     });
 
-    store.iosKeys.set(keyId, {
-      publicKey: stored.publicKey,
-      signCount: result.signCount,
-    });
-    store.challenges.delete(requestId);
+    await saveIosKey(keyId, { publicKey: stored.publicKey, signCount: result.signCount });
+    await deleteChallenge(requestId);
     return json({ ok: true });
   } catch {
     return json({ ok: false, reason: 'unauthorized' }, { status: 401 });
