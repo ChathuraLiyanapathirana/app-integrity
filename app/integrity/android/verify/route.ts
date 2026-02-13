@@ -26,6 +26,29 @@ function fp(value: string) {
   return crypto.createHash('sha256').update(value).digest('hex').slice(0, 12);
 }
 
+function toBase64Url(s: string) {
+  return s.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function decodeB64Any(input: string): Buffer | null {
+  try {
+    // Accept base64url or base64 (with/without padding).
+    const normalized = input.replace(/-/g, '+').replace(/_/g, '/');
+    const padLen = (4 - (normalized.length % 4)) % 4;
+    const padded = normalized + '='.repeat(padLen);
+    const buf = Buffer.from(padded, 'base64');
+    if (buf.length === 0) return null;
+    return buf;
+  } catch {
+    return null;
+  }
+}
+
+function buffersEqual(a: Buffer, b: Buffer) {
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 function json(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, {
     ...init,
@@ -59,7 +82,9 @@ export async function POST(request: Request) {
     if (!record || record.platform !== 'android') {
       return json({ ok: false, reason: 'invalid_requestId' }, { status: 401 });
     }
-    if (record.nonce !== nonce) {
+    const recordNonceBytes = decodeB64Any(record.nonce);
+    const bodyNonceBytes = decodeB64Any(nonce);
+    if (!recordNonceBytes || !bodyNonceBytes || !buffersEqual(recordNonceBytes, bodyNonceBytes)) {
       return json({ ok: false, reason: 'nonce_mismatch' }, { status: 401 });
     }
 
@@ -91,7 +116,7 @@ export async function POST(request: Request) {
         },
         request: {
           requestIdFp: fp(requestId),
-          nonceFp: fp(nonce),
+          nonceFp: fp(toBase64Url(nonce)),
           nonceLen: nonce.length,
         },
       });
@@ -128,12 +153,18 @@ export async function POST(request: Request) {
     if (requestDetails.requestPackageName !== packageName) {
       return json({ ok: false, reason: 'package_mismatch' }, { status: 401 });
     }
-    if (requestDetails.nonce !== nonce) {
-      if (isDebug() && typeof requestDetails.nonce === 'string') {
+    if (typeof requestDetails.nonce !== 'string') {
+      return json({ ok: false, reason: 'nonce_missing_payload' }, { status: 401 });
+    }
+
+    const payloadNonceBytes = decodeB64Any(requestDetails.nonce);
+    if (!payloadNonceBytes || !buffersEqual(recordNonceBytes, payloadNonceBytes)) {
+      if (isDebug()) {
         console.warn('[integrity/android/verify] nonce mismatch detail', {
           requestIdFp: fp(requestId),
-          expected: { fp: fp(nonce), len: nonce.length },
-          payload: { fp: fp(requestDetails.nonce), len: requestDetails.nonce.length },
+          expected: { fp: fp(toBase64Url(record.nonce)), len: record.nonce.length },
+          body: { fp: fp(toBase64Url(nonce)), len: nonce.length },
+          payload: { fp: fp(toBase64Url(requestDetails.nonce)), len: requestDetails.nonce.length },
         });
       }
       return json({ ok: false, reason: 'nonce_mismatch_payload' }, { status: 401 });
