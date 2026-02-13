@@ -15,6 +15,7 @@ function isDebug() {
   return String(process.env.INTEGRITY_DEBUG || '').toLowerCase() === 'true';
 }
 
+
 function envPresence(name: string) {
   const v = process.env[name];
   if (!v) return { name, set: false as const };
