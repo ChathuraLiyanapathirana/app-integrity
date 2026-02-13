@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { google } from 'googleapis';
+import crypto from 'crypto';
 
 import {
   cleanupExpiredChallenges,
@@ -9,6 +10,16 @@ import {
 } from '@/lib/integrityStore';
 
 export const runtime = 'nodejs';
+
+function isDebug() {
+  return String(process.env.INTEGRITY_DEBUG || '').toLowerCase() === 'true';
+}
+
+function envPresence(name: string) {
+  const v = process.env[name];
+  if (!v) return { name, set: false as const };
+  return { name, set: true as const, length: v.length };
+}
 
 function json(data: unknown, init?: ResponseInit) {
   return NextResponse.json(data, {
@@ -59,6 +70,17 @@ export async function POST(request: Request) {
       process.env.GOOGLE_APPLICATION_CREDENTIALS_JSON ||
       process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
     const credsB64 = process.env.GOOGLE_APPLICATION_CREDENTIALS_B64;
+
+    if (isDebug()) {
+      // Safe diagnostics: never log token or private keys.
+      console.log('[integrity/android/verify] debug env', {
+        packageName,
+        ...envPresence('ANDROID_PACKAGE_NAME'),
+        ...envPresence('GOOGLE_APPLICATION_CREDENTIALS_JSON'),
+        ...envPresence('GOOGLE_APPLICATION_CREDENTIALS_B64'),
+        ...envPresence('GOOGLE_APPLICATION_CREDENTIALS'),
+      });
+    }
 
     let auth: InstanceType<typeof google.auth.GoogleAuth>;
     if (credsJson || credsB64) {
@@ -129,9 +151,16 @@ export async function POST(request: Request) {
 
     store.challenges.delete(requestId);
     return json({ ok: true });
-  } catch {
+  } catch (e) {
+    const errorId = crypto.randomUUID();
+    console.error('[integrity/android/verify] error', {
+      errorId,
+      message: e instanceof Error ? e.message : String(e),
+      name: e instanceof Error ? e.name : undefined,
+      stack: isDebug() && e instanceof Error ? e.stack : undefined,
+    });
     // Avoid leaking details in production.
-    return json({ ok: false, reason: 'server_error' }, { status: 500 });
+    return json({ ok: false, reason: 'server_error', errorId }, { status: 500 });
   }
 }
 
