@@ -182,13 +182,36 @@ export async function POST(request: Request) {
 
     // Optional: enforce signing certificate digests (repackaging protection).
     const allowedCerts = (process.env.ANDROID_ALLOWED_CERT_SHA256 || '')
-      .split(',')
+      .split(/[\s,]+/g) // allow comma / newline / spaces
       .map((s) => s.trim())
       .filter(Boolean);
     const certDigests = (appIntegrity.certificateSha256Digest || []) as string[];
     if (allowedCerts.length > 0 && Array.isArray(certDigests)) {
       const ok = allowedCerts.some((c) => certDigests.includes(c));
-      if (!ok) return json({ ok: false, reason: 'signing_cert_mismatch' }, { status: 401 });
+      if (!ok) {
+        if (isDebug()) {
+          console.warn('[integrity/android/verify] signing cert mismatch', {
+            requestIdFp: fp(requestId),
+            allowedCertsCount: allowedCerts.length,
+            allowedCertsPreview: allowedCerts.map((c) => c.slice(0, 8) + '…'),
+            payloadCertDigests: certDigests,
+          });
+          return json(
+            {
+              ok: false,
+              reason: 'signing_cert_mismatch',
+              debug: {
+                payloadCertificateSha256Digest: certDigests,
+                allowed: allowedCerts,
+                hint:
+                  'Set ANDROID_ALLOWED_CERT_SHA256 to one of payloadCertificateSha256Digest values, or unset it to disable pinning.',
+              },
+            },
+            { status: 401 },
+          );
+        }
+        return json({ ok: false, reason: 'signing_cert_mismatch' }, { status: 401 });
+      }
     }
 
     // Optional: require a strong device integrity verdict.
